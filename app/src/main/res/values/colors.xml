@@ -3,4 +3,9 @@
     <color name="colorPrimary">#3F51B5</color>
     <color name="colorPrimaryDark">#303F9F</color>
     <color name="colorAccent">#FF4081</color>
+
+
+    <color name="light_sleep_blue">#3aa9d6</color>
+    <color name="wake_up_yellow">#f2b42f</color>
+    <color name="deep_sleep_purple">#2720a2</color>
 </resources>

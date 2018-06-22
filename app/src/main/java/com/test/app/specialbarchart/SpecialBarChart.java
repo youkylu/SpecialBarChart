@@ -6,10 +6,12 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PointF;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.os.Build;
 import android.support.annotation.Nullable;
 import android.support.annotation.RequiresApi;
+import android.text.TextPaint;
 import android.util.AttributeSet;
 import android.util.FloatMath;
 import android.util.Log;
@@ -33,7 +35,6 @@ import java.util.List;
  */
 public class SpecialBarChart extends View {
 
-    private SpecialBarChart specialBarChart;
     private Paint mPaint;
     private List<Integer> paintColors = new ArrayList<Integer>();
     private List<Integer> listRange = new ArrayList<Integer>();
@@ -43,6 +44,8 @@ public class SpecialBarChart extends View {
     private int sum = 0;
     private int highlightedId = -1;
     private OnChartClickListener listener;
+    private TextPaint textPaint, textEmptyPaint;
+    private Rect minRect, secondRect, emptyRect;
 
     final public static int DRAG = 1;
     final public static int ZOOM = 2;
@@ -63,10 +66,7 @@ public class SpecialBarChart extends View {
 
     private float x_down = 0;
     private float y_down = 0;
-    float minScale = 1f;
-    float maxScale = 500f;
-    float lastScale = 1;
-    float newScale = 1f;
+
     float newDis = 1f;
 
     float[] m = new float[9];
@@ -75,6 +75,14 @@ public class SpecialBarChart extends View {
     float translateY;
     float mScaleFactor;
     private List<RectF> rectFList = new ArrayList<>();
+    private boolean clicked = false;
+    private String time = "";
+    private String state = "";
+    private String emptyString = "暂无数据";
+    private int textWidth, secondTextWidth, emptyTextWidth;
+    private int textHeight, secondTextHeight, emptyTextHeight;
+    private int originX;
+    private int originY;
 
 
     public SpecialBarChart(Context context) {
@@ -96,19 +104,35 @@ public class SpecialBarChart extends View {
         mPaint.setStrokeWidth(0f);
         setBackgroundColor(Color.GRAY);
 
+        textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        textPaint.setTextSize(30);
+        textPaint.setColor(Color.WHITE);
+
+        textEmptyPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        textEmptyPaint.setTextSize(50);
+        textEmptyPaint.setColor(Color.YELLOW);
+
     }
 
-    public void setData(List<HashMap<String, Integer>> listData, List<Integer> paintColors) {
+    public void setData(List<Integer> listHight,List<Integer> listWidth, List<Integer> paintColors) {
+        /**
+         * 数据改变时候去掉点击出现的高亮和文字
+         */
+        clicked = false;
+        highlightedId = -1;
+
         this.listDegree.clear();
         this.paintColors.clear();
+        this.listRange.clear();
         sum = 0;
-        for (HashMap<String, Integer> map : listData) {
-            this.listDegree.add(map.get("high"));
-            sum = sum + map.get("width");
-            this.listRange.add(map.get("width"));
+        listDegree.addAll(listHight);
+
+        for (int width : listWidth) {
+            listRange.add(width);
+            sum = sum + width;
         }
         this.paintColors.addAll(paintColors);
-//        postInvalidate();
+        postInvalidate();
     }
 
 
@@ -116,15 +140,45 @@ public class SpecialBarChart extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
-//        if (listRange.size() > 0) {
-        //画矩形图
-        drawRectFView(canvas);
-//        }
+        if (listRange.size() > 0) {
+            //画矩形图
+            drawRectFView(canvas);
+
+            if (clicked) {
+                drawText(canvas);
+            }
+        }else{
+            drawEmpty(canvas);
+        }
 
         this.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         canvas.concat(matrix);
         this.setLayerType(View.LAYER_TYPE_NONE, null);
 
+    }
+
+    private void drawEmpty(Canvas canvas) {
+        emptyRect = new Rect();
+        textEmptyPaint.getTextBounds(emptyString, 0, emptyString.length(), emptyRect);
+        emptyTextWidth = emptyRect.width();
+        emptyTextHeight = emptyRect.height();
+        canvas.drawText(emptyString, mWidth/2-emptyRect.right/2, mHeight/2-emptyRect.bottom/2, textEmptyPaint);
+    }
+
+    private void drawText(Canvas canvas) {
+        secondRect = new Rect();
+        textPaint.getTextBounds(state, 0, state.length(), secondRect);
+        secondTextWidth = secondRect.width();
+        secondTextHeight = secondRect.height();
+        canvas.drawText(state, originX-secondTextWidth/2, originY -secondTextHeight/2, textPaint);
+
+
+        minRect = new Rect();
+        textPaint.getTextBounds(time, 0, time.length(), minRect);
+        textWidth = minRect.width();
+        textHeight = minRect.height();
+
+        canvas.drawText(time, originX-textWidth/2, originY -textHeight/2-secondTextHeight, textPaint);
     }
 
 
@@ -154,7 +208,13 @@ public class SpecialBarChart extends View {
             //下移的距离
             RectF oval = new RectF((float) ((sumNew - listRange.get(i)) * mWidth / sum), (float) moveHeight, (float) (sumNew * mWidth / sum), (float) mHeight);
             matrix.mapRect(oval);
-
+            /**
+             * 让点击显示的text随着缩放而移动
+             */
+            if (highlightedId == i) {
+                originX = (int) ((oval.left + oval.right) / 2);
+                originY = (int) oval.top;
+            }
             canvas.drawRect(oval, mPaint);
             rectFList.add(oval);
         }
@@ -171,8 +231,6 @@ public class SpecialBarChart extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-
-//        PointF curr = new PointF(event.getX(), event.getY());
 
         switch (event.getAction() & MotionEvent.ACTION_MASK) {
             case MotionEvent.ACTION_DOWN:
@@ -235,22 +293,15 @@ public class SpecialBarChart extends View {
                     float x = event.getX();
                     float y = event.getY();
                     //判断点击点的位置
-                    double sumS = 0;
-//                    for (int i = 0; i < listDegree.size(); i++) {
-//                        sumS = sumS + listRange.get(i);
-//                        if (x < (float) ((sumS - listRange.get(i)) * mWidth / sum) || x >= (float) (sumS * mWidth / sum))
-//                            continue;
-//                        highlightedId = i;
-//                        invalidate();
-//                        listener.onClick(i);
-//                        break;
-//                    }
                     for (int i = 0; i < rectFList.size(); i++) {
                         if (!rectFList.get(i).contains(x, y))
                             continue;
                         highlightedId = i;
-                        invalidate();
+                        clicked = true;
+                        originX = (int) ((rectFList.get(i).left + rectFList.get(i).right) / 2);
+                        originY = (int) rectFList.get(i).top;
                         listener.onClick(i);
+                        invalidate();
                         break;
                     }
                 }
@@ -318,6 +369,12 @@ public class SpecialBarChart extends View {
         }
     }
 
+    /**
+     * 限制缩放背书以及左右滑动距离
+     *
+     * @param matrix
+     * @return
+     */
     private Matrix check(Matrix matrix) {
         matrix.getValues(m);
 //        if(m[Matrix.MSCALE_X]>5f){
@@ -336,4 +393,19 @@ public class SpecialBarChart extends View {
     }
 
 
+    /**
+     * 设置点击时候显示的文字
+     * @param time
+     * @param state
+     */
+    public void setText(String time, String state) {
+        this.time = time;
+        this.state = state;
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        getParent().requestDisallowInterceptTouchEvent(true);
+        return super.dispatchTouchEvent(event);
+    }
 }
